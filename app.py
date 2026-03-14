@@ -118,6 +118,7 @@ def create_lead():
 
 # ============== AUTH ROUTES ==============
 
+@app.route('/api/auth/login', methods=['POST'])
 @app.route('/api/auth/login/', methods=['POST'])
 def login():
     data = request.get_json() or {}
