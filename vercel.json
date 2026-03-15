@@ -8,6 +8,25 @@
   ],
   "routes": [
     {
+      "src": "/api/leads",
+      "dest": "app.py",
+      "methods": ["GET", "POST", "OPTIONS"]
+    },
+    {
+      "src": "/api/auth/login",
+      "dest": "app.py",
+      "methods": ["POST", "OPTIONS"]
+    },
+    {
+      "src": "/api/admin/leads",
+      "dest": "app.py",
+      "methods": ["GET", "OPTIONS"]
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "app.py"
+    },
+    {
       "src": "/(.*)",
       "dest": "app.py"
     }
