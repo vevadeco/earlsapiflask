@@ -140,6 +140,7 @@ def verify():
 
 # ============== ADMIN ROUTES ==============
 
+@app.route('/api/admin/leads', methods=['GET'])
 @app.route('/api/admin/leads/', methods=['GET'])
 def get_leads():
     if not verify_token():
@@ -152,6 +153,7 @@ def get_leads():
     leads = list(db.leads.find({}, {'_id': 0}).sort('created_at', -1))
     return jsonify(leads)
 
+@app.route('/api/admin/leads/<lead_id>/status', methods=['PATCH'])
 @app.route('/api/admin/leads/<lead_id>/status/', methods=['PATCH'])
 def update_lead_status(lead_id):
     if not verify_token():
@@ -165,6 +167,7 @@ def update_lead_status(lead_id):
     
     return jsonify({"success": True})
 
+@app.route('/api/admin/analytics', methods=['GET'])
 @app.route('/api/admin/analytics/', methods=['GET'])
 def get_analytics():
     if not verify_token():
