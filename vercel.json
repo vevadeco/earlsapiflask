@@ -8,27 +8,19 @@
   ],
   "routes": [
     {
-      "src": "/api/leads",
-      "dest": "app.py",
-      "methods": ["GET", "POST", "OPTIONS"]
-    },
-    {
-      "src": "/api/auth/login",
-      "dest": "app.py",
-      "methods": ["POST", "OPTIONS"]
-    },
-    {
-      "src": "/api/admin/leads",
-      "dest": "app.py",
-      "methods": ["GET", "OPTIONS"]
-    },
-    {
-      "src": "/api/(.*)",
-      "dest": "app.py"
-    },
-    {
       "src": "/(.*)",
-      "dest": "app.py"
+      "dest": "app.py",
+      "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,PATCH,DELETE,OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type,Authorization" }
+      ]
     }
   ]
 }
