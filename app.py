@@ -89,6 +89,7 @@ def get_promo():
         "deadline_date": "2026-03-01"
     })
 
+@app.route('/api/leads', methods=['POST'])
 @app.route('/api/leads/', methods=['POST'])
 def create_lead():
     data = request.get_json() or {}
