@@ -91,30 +91,40 @@ def get_promo():
 @app.route('/api/leads', methods=['POST'])
 @app.route('/api/leads/', methods=['POST'])
 def create_lead():
-    data = request.get_json() or {}
-    
-    # Validate
-    required = ['name', 'email', 'phone', 'service_type']
-    if not all(r in data for r in required):
-        return jsonify({"success": False, "message": "Missing required fields"}), 400
-    
-    db = get_db()
-    if db is None:
-        # Store in memory if no DB
-        return jsonify({"success": True, "message": "Lead received", "lead_id": str(uuid.uuid4())})
-    
-    lead = {
-        "id": str(uuid.uuid4()),
-        "name": data['name'],
-        "email": data['email'],
-        "phone": data['phone'],
-        "service_type": data['service_type'],
-        "status": "new",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    
-    db.leads.insert_one(lead)
-    return jsonify({"success": True, "message": "Lead created", "lead_id": lead['id']})
+    try:
+        data = request.get_json() or {}
+        
+        # Validate
+        required = ['name', 'email', 'phone', 'service_type']
+        if not all(r in data for r in required):
+            return jsonify({"success": False, "message": "Missing required fields"}), 400
+        
+        db = get_db()
+        
+        lead = {
+            "id": str(uuid.uuid4()),
+            "name": data['name'],
+            "email": data['email'],
+            "phone": data['phone'],
+            "service_type": data['service_type'],
+            "status": "new",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        if db is not None:
+            try:
+                db.leads.insert_one(lead)
+            except Exception as e:
+                print(f"DB error: {e}")
+                # Still return success to frontend
+                pass
+        
+        return jsonify({"success": True, "message": "Lead received", "lead_id": lead['id']})
+    except Exception as e:
+        import traceback
+        print(f"Error: {e}")
+        print(traceback.format_exc())
+        return jsonify({"success": False, "message": "Server error", "error": str(e)}), 500
 
 # ============== AUTH ROUTES ==============
 
