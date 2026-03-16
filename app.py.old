@@ -1,30 +1,36 @@
 """
-Earl's Landscaping - Combined Backend + Frontend
-Single Vercel deployment - Flask serves both API and React frontend
+Earl's Landscaping API
 """
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify
 from datetime import datetime, timezone, timedelta
 import uuid
 import jwt
 import os
-import traceback
 
-app = Flask(__name__, static_folder='build', static_url_path='')
+try:
+    from flask_cors import CORS
+    HAS_CORS = True
+except:
+    HAS_CORS = False
 
-# ============== CONFIG ==============
+app = Flask(__name__)
+
+if HAS_CORS:
+    CORS(app)
+else:
+    @app.after_request
+    def after_request(response):
+        response.headers.set('Access-Control-Allow-Origin', '*')
+        response.headers.set('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+        return response
+
+# Config
 JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret')
 ADMIN_USER = os.environ.get('ADMIN_USERNAME', 'shahbaz')
 ADMIN_PASS = os.environ.get('ADMIN_PASSWORD', 'Shaherzad123!')
 
-# ============== CORS ==============
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-    return response
-
-# ============== MONGODB ==============
+# MongoDB
 db = None
 db_available = False
 
@@ -44,23 +50,16 @@ def get_db():
                 pass
     return db
 
-# ============== API ROUTES ==============
-
-@app.route('/api/health')
-def health():
-    return jsonify({
-        "status": "ok",
-        "db_connected": db_available,
-        "version": "combined-1.0"
-    })
-
+@app.route('/')
 @app.route('/api/')
-def api_root():
-    return jsonify({
-        "message": "Earl's Landscaping API",
-        "status": "ok",
-        "db_connected": db_available
-    })
+def root():
+    get_db()
+    return jsonify({"message": "Earl's Landscaping API", "status": "ok", "db_connected": db_available})
+
+@app.route('/api/test', methods=['GET', 'POST', 'OPTIONS'])
+def test_endpoint():
+    """Simple test endpoint to verify CORS and POST working"""
+    return jsonify({"method": request.method, "success": True, "timestamp": datetime.now(timezone.utc).isoformat()})
 
 @app.route('/api/promo-banner', methods=['GET', 'OPTIONS'])
 @app.route('/api/promo-banner/', methods=['GET', 'OPTIONS'])
@@ -81,9 +80,6 @@ def track_pageview():
 @app.route('/api/leads', methods=['POST', 'OPTIONS'])
 @app.route('/api/leads/', methods=['POST', 'OPTIONS'])
 def create_lead():
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
     try:
         data = request.get_json(force=True, silent=True) or {}
         db = get_db()
@@ -103,17 +99,12 @@ def create_lead():
         
         return jsonify({"success": True, "message": "Lead created"})
     except Exception as e:
-        traceback.print_exc()
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 @app.route('/api/auth/login/', methods=['POST', 'OPTIONS'])
 def login():
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
     data = request.get_json(force=True, silent=True) or {}
-    
     if data.get('username') == ADMIN_USER and data.get('password') == ADMIN_PASS:
         token = jwt.encode({
             'sub': data['username'],
@@ -125,9 +116,6 @@ def login():
 @app.route('/api/admin/leads', methods=['GET', 'OPTIONS'])
 @app.route('/api/admin/leads/', methods=['GET', 'OPTIONS'])
 def get_leads():
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
     auth = request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({"error": "Unauthorized"}), 401
@@ -146,24 +134,3 @@ def get_leads():
         if isinstance(lead.get('created_at'), datetime):
             lead['created_at'] = lead['created_at'].isoformat()
     return jsonify(leads)
-
-# ============== SERVE FRONTEND ==============
-
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve(path):
-    """Serve React app for all non-API routes"""
-    if path.startswith('api/'):
-        return jsonify({"error": "API route not found"}), 404
-    
-    # Serve static files from build folder
-    static_file = os.path.join(app.static_folder, path)
-    if path and os.path.exists(static_file) and os.path.isfile(static_file):
-        return send_from_directory(app.static_folder, path)
-    
-    # Otherwise serve index.html (React handles routing)
-    return send_from_directory(app.static_folder, 'index.html')
-
-# For development
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
