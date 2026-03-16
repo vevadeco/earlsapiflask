@@ -1,8 +1,7 @@
 """
-Earl's Landscaping API - Fixed Version
+Earl's Landscaping API - With MongoDB
 """
-from flask import Flask, request, jsonify, g
-from werkzeug.security import generate_password_hash
+from flask import Flask, request, jsonify
 from datetime import datetime, timezone, timedelta
 import uuid
 import jwt
@@ -11,7 +10,7 @@ import traceback
 
 app = Flask(__name__)
 
-# Manual CORS handler
+# CORS
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
@@ -23,12 +22,30 @@ def after_request(response):
 JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'shahbaz')
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'Shaherzad123!')
+MONGO_URL = os.environ.get('MONGO_URL', '')
+DB_NAME = os.environ.get('DB_NAME', 'earls_prod')
 
-# In-memory storage
-leads_db = []
-page_views = []
+print(f"API Starting - MongoDB: {'Connected' if MONGO_URL else 'Not configured'}")
 
-print(f"Starting Earl's API - Admin: {ADMIN_USERNAME}")
+# MongoDB connection (lazy)
+db = None
+db_available = False
+
+def get_db():
+    global db, db_available
+    if db is None and MONGO_URL:
+        try:
+            from pymongo import MongoClient
+            client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
+            # Test connection
+            client.server_info()
+            db = client[DB_NAME]
+            db_available = True
+            print("MongoDB connected successfully")
+        except Exception as e:
+            print(f"MongoDB connection failed: {e}")
+            db_available = False
+    return db
 
 # ============== AUTH ==============
 
@@ -55,11 +72,11 @@ def verify_token():
 
 @app.route('/', methods=['GET', 'OPTIONS'])
 def root():
-    return jsonify({"message": "Earl's Landscaping API", "status": "ok"})
+    return jsonify({"message": "Earl's Landscaping API", "status": "ok", "db": db_available})
 
 @app.route('/api/', methods=['GET', 'OPTIONS'])
 def api_root():
-    return jsonify({"message": "Earl's Landscaping API", "status": "ok"})
+    return jsonify({"message": "Earl's Landscaping API", "status": "ok", "db": db_available})
 
 @app.route('/api/promo-banner/', methods=['GET', 'OPTIONS'])
 def get_promo():
@@ -79,45 +96,40 @@ def create_lead():
     
     try:
         data = request.get_json() or {}
-        print(f"Creating lead: {data}")
+        print(f"Creating lead: {data.get('email')}")
         
         required = ['name', 'email', 'phone', 'service_type']
         if not all(r in data for r in required):
             return jsonify({"success": False, "message": "Missing required fields"}), 400
         
         lead = {
-            "id": str(uuid.uuid4()),
+            "_id": str(uuid.uuid4()),
             "name": data['name'],
             "email": data['email'],
             "phone": data['phone'],
             "service_type": data['service_type'],
             "status": "new",
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": datetime.now(timezone.utc)
         }
         
-        leads_db.append(lead)
-        print(f"Lead created: {lead['id']}, Total leads: {len(leads_db)}")
+        # Save to MongoDB
+        db = get_db()
+        if db:
+            try:
+                db.leads.insert_one(lead)
+                print(f"Lead saved to MongoDB: {lead['_id']}")
+            except Exception as e:
+                print(f"MongoDB save failed: {e}")
+                return jsonify({"success": False, "message": "Database error"}), 500
+        else:
+            print("No database available")
+            return jsonify({"success": False, "message": "Database not configured"}), 500
         
-        return jsonify({"success": True, "message": "Lead created", "lead_id": lead['id']})
+        return jsonify({"success": True, "message": "Lead created", "lead_id": lead['_id']})
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error creating lead: {e}")
         print(traceback.format_exc())
         return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route('/api/analytics/pageview/', methods=['POST', 'OPTIONS'])
-def track_pageview():
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
-    data = request.get_json() or {}
-    page_view = {
-        "id": str(uuid.uuid4()),
-        "page": data.get('page', '/'),
-        "referrer": data.get('referrer'),
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-    page_views.append(page_view)
-    return jsonify({"success": True})
 
 # ============== AUTH ROUTES ==============
 
@@ -130,8 +142,6 @@ def login():
     data = request.get_json() or {}
     username = data.get('username')
     password = data.get('password')
-    
-    print(f"Login attempt: {username}")
     
     if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
         token = generate_token(username)
@@ -157,59 +167,31 @@ def get_leads():
     if not verify_token():
         return jsonify({"error": "Unauthorized"}), 401
     
-    return jsonify(leads_db)
-
-@app.route('/api/admin/leads/<lead_id>/status/', methods=['PATCH', 'OPTIONS'])
-def update_lead_status(lead_id):
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
-    if not verify_token():
-        return jsonify({"error": "Unauthorized"}), 401
-    
-    data = request.get_json() or {}
-    
-    for lead in leads_db:
-        if lead['id'] == lead_id:
-            lead['status'] = data.get('status', 'new')
-            return jsonify({"success": True})
-    
-    return jsonify({"error": "Lead not found"}), 404
-
-@app.route('/api/admin/analytics/', methods=['GET', 'OPTIONS'])
-def get_analytics():
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
-    if not verify_token():
-        return jsonify({"error": "Unauthorized"}), 401
-    
-    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    today_str = today.isoformat()
-    
-    leads_today = [l for l in leads_db if l.get('created_at', '').startswith(today_str[:10])]
-    
-    return jsonify({
-        "total_visitors": len(page_views),
-        "total_leads": len(leads_db),
-        "visitors_today": 0,
-        "leads_today": len(leads_today),
-        "conversion_rate": 0,
-        "daily_stats": []
-    })
+    try:
+        db = get_db()
+        if not db:
+            return jsonify({"error": "Database not available"}), 500
+        
+        leads = list(db.leads.find({}, {'_id': 0}).sort('created_at', -1))
+        
+        # Convert datetime to string for JSON serialization
+        for lead in leads:
+            if isinstance(lead.get('created_at'), datetime):
+                lead['created_at'] = lead['created_at'].isoformat()
+        
+        print(f"Retrieved {len(leads)} leads")
+        return jsonify(leads)
+    except Exception as e:
+        print(f"Error retrieving leads: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # ============== ERROR HANDLERS ==============
 
 @app.errorhandler(404)
 def not_found(e):
-    print(f"404: {request.path}")
     return jsonify({"error": "Not found", "path": request.path}), 404
 
 @app.errorhandler(500)
 def server_error(e):
-    print(f"500: {e}")
-    return jsonify({"error": "Server error", "message": str(e)}), 500
-
-# Vercel handler
-if __name__ == '__main__':
-    app.run(debug=True)
+    print(f"500 error: {e}")
+    return jsonify({"error": "Server error"}), 500
