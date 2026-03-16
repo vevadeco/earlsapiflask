@@ -1,67 +1,64 @@
 """
-Earl's Landscaping API - Debug Version
+Earl's Landscaping API
 """
 from flask import Flask, request, jsonify
 from datetime import datetime, timezone, timedelta
 import uuid
 import jwt
 import os
-import traceback
 
 app = Flask(__name__)
-
-# Store connection error globally
-db_connection_error = None
-
-# MongoDB connection
-db = None
-db_available = False
-
-def get_db():
-    global db, db_available, db_connection_error
-    if db is None:
-        mongo_url = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL', '')
-        db_name = os.environ.get('DB_NAME', 'atlas-pink-xylophone')
-        
-        if mongo_url:
-            try:
-                from pymongo import MongoClient
-                client = MongoClient(mongo_url, serverSelectionTimeoutMS=10000)
-                client.admin.command('ping')
-                db = client[db_name]
-                db_available = True
-            except Exception as e:
-                db_connection_error = str(e)
-    return db
 
 # Config
 JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret')
 ADMIN_USER = os.environ.get('ADMIN_USERNAME', 'shahbaz')
 ADMIN_PASS = os.environ.get('ADMIN_PASSWORD', 'Shaherzad123!')
 
+# MongoDB
+db = None
+db_available = False
+
+def get_db():
+    global db, db_available
+    if db is None:
+        mongo_url = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL', '')
+        db_name = os.environ.get('DB_NAME', 'atlas-pink-xylophone')
+        if mongo_url:
+            try:
+                from pymongo import MongoClient
+                client = MongoClient(mongo_url)
+                client.admin.command('ping')
+                db = client[db_name]
+                db_available = True
+            except:
+                pass
+    return db
+
 # CORS
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,PATCH,OPTIONS')
     return response
 
-# ============== ROUTES ==============
-
 @app.route('/')
-@app.route('/api/')
 def root():
     get_db()
     return jsonify({
         "message": "Earl's Landscaping API",
         "status": "ok",
-        "db_configured": bool(os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL')),
-        "db_connected": db_available,
-        "db_error": db_connection_error
+        "db_connected": db_available
     })
 
-@app.route('/api/promo-banner/')
+@app.route('/api/')
+def api_root():
+    return jsonify({
+        "message": "Earl's Landscaping API",
+        "status": "ok",
+        "db_connected": db_available
+    })
+
+@app.route('/api/promo-banner/', methods=['GET', 'OPTIONS'])
 def get_promo():
     return jsonify({
         "enabled": True,
@@ -105,17 +102,39 @@ def login():
         return jsonify({}), 200
     
     data = request.get_json(force=True, silent=True) or {}
-    
     if data.get('username') == ADMIN_USER and data.get('password') == ADMIN_PASS:
         token = jwt.encode({
             'sub': data['username'],
             'exp': datetime.now(timezone.utc) + timedelta(hours=24)
         }, JWT_SECRET, algorithm='HS256')
         return jsonify({"success": True, "token": token})
-    
     return jsonify({"success": False, "message": "Invalid credentials"}), 401
 
-# Error handlers
-@app.errorhandler(Exception)
-def handle_error(e):
-    return jsonify({"error": str(e)}), 500
+@app.route('/api/admin/leads', methods=['GET', 'OPTIONS'])
+@app.route('/api/admin/leads/', methods=['GET', 'OPTIONS'])
+def get_leads():
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    
+    # Check auth
+    auth = request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({"error": "Unauthorized - no token"}), 401
+    
+    try:
+        jwt.decode(auth.replace('Bearer ', ''), JWT_SECRET, algorithms=['HS256'])
+    except:
+        return jsonify({"error": "Unauthorized - invalid token"}), 401
+    
+    db = get_db()
+    if not db:
+        return jsonify([])
+    
+    try:
+        leads = list(db.leads.find({}, {'_id': 0}).sort('created_at', -1))
+        for lead in leads:
+            if isinstance(lead.get('created_at'), datetime):
+                lead['created_at'] = lead['created_at'].isoformat()
+        return jsonify(leads)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
