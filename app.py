@@ -80,14 +80,18 @@ def get_promo():
         "deadline_date": "2026-03-01"
     })
 
-@app.route('/api/leads', methods=['POST', 'OPTIONS'])
-@app.route('/api/leads/', methods=['POST', 'OPTIONS'])
+@app.route('/api/leads', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+@app.route('/api/leads/', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 def create_lead():
     if request.method == 'OPTIONS':
         return jsonify({}), 200
     
+    if request.method != 'POST':
+        return jsonify({"message": f"Method {request.method} not implemented, use POST"}), 405
+    
     try:
         data = request.get_json() or {}
+        print(f"Received lead data: {data}")
         db = get_db()
         
         lead = {
@@ -102,10 +106,15 @@ def create_lead():
         
         if db:
             db.leads.insert_one(lead)
+            print(f"Lead saved: {lead['_id']}")
             return jsonify({"success": True, "message": "Lead created"})
         else:
+            print(f"DB not available: {db_connection_error}")
             return jsonify({"success": False, "message": "Database not connected", "error": db_connection_error}), 500
     except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        print(traceback.format_exc())
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
