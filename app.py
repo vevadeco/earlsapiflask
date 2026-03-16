@@ -51,19 +51,26 @@ db_available = False
 def get_db():
     global db, db_available
     if db is None:
-        mongo_url = get_config('MONGO_URL')
-        db_name = get_config('DB_NAME')
+        # Get MongoDB URI - try MONGODB_URI first (Vercel MongoDB integration)
+        mongo_url = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL', '')
+        db_name = os.environ.get('DB_NAME', 'atlas-pink-xylophone')
+        
+        print(f"Connecting to MongoDB... URL set: {bool(mongo_url)}")
         
         if mongo_url:
             try:
                 from pymongo import MongoClient
-                client = MongoClient(mongo_url, serverSelectionTimeoutMS=5000)
-                client.server_info()
+                client = MongoClient(mongo_url)
+                # Test connection
+                client.admin.command('ping')
                 db = client[db_name]
                 db_available = True
+                print("MongoDB connected successfully!")
             except Exception as e:
-                print(f"MongoDB failed: {e}")
+                print(f"MongoDB connection failed: {e}")
                 db_available = False
+        else:
+            print("No MongoDB URL configured")
     return db
 
 # ============== AUTH ==============
