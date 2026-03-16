@@ -13,7 +13,7 @@ app = Flask(__name__)
 # Email config
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 FROM_EMAIL = os.environ.get('FROM_EMAIL', 'onboarding@resend.dev')
-NOTIFICATION_EMAILS = ['vevadeco@gmail.com', 'info@earlslandscaping.ca']
+NOTIFICATION_EMAILS = ['vevadeco@gmail.com', 'vevadeco@gmail.com']
 
 # CORS
 @app.after_request
@@ -23,14 +23,16 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,PATCH,OPTIONS')
     return response
 
-# Config
+# Config - Read at startup
 JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'shahbaz')
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'Shaherzad123!')
 MONGO_URL = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL', '')
 DB_NAME = os.environ.get('DB_NAME', 'atlas-pink-xylophone')
 
-print(f"API Starting - MongoDB: {'Connected' if MONGO_URL else 'Not configured'}")
+# Debug: log env var status (don't log actual values)
+print(f"MONGO_URL set: {bool(MONGO_URL)}")
+print(f"DB_NAME: {DB_NAME}")
 
 # MongoDB connection (lazy)
 db = None
@@ -42,13 +44,12 @@ def get_db():
         try:
             from pymongo import MongoClient
             client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
-            # Test connection
             client.server_info()
             db = client[DB_NAME]
             db_available = True
-            print("MongoDB connected successfully")
+            print("MongoDB connected")
         except Exception as e:
-            print(f"MongoDB connection failed: {e}")
+            print(f"MongoDB failed: {e}")
             db_available = False
     return db
 
@@ -122,12 +123,12 @@ def create_lead():
         if db:
             try:
                 db.leads.insert_one(lead)
-                print(f"Lead saved to MongoDB: {lead['_id']}")
+                print(f"Lead saved: {lead['_id']}")
             except Exception as e:
                 print(f"MongoDB save failed: {e}")
                 return jsonify({"success": False, "message": "Database error"}), 500
         else:
-            print("No database available")
+            print("No database")
             return jsonify({"success": False, "message": "Database not configured"}), 500
         
         # Send email notification
@@ -220,4 +221,4 @@ def not_found(e):
 @app.errorhandler(500)
 def server_error(e):
     print(f"500 error: {e}")
-    return jsonify({"error": "Server error"}), 500
+    return jsonify({"error": "Server error"
