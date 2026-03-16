@@ -28,7 +28,7 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret')
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'shahbaz')
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'Shaherzad123!')
 MONGO_URL = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL', '')
-DB_NAME = os.environ.get('DB_NAME', 'earls_prod')
+DB_NAME = os.environ.get('DB_NAME', 'atlas-pink-xylophone')
 
 print(f"API Starting - MongoDB: {'Connected' if MONGO_URL else 'Not configured'}")
 
