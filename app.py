@@ -1,13 +1,29 @@
 """
 Earl's Landscaping API
 """
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify
 from datetime import datetime, timezone, timedelta
 import uuid
 import jwt
 import os
 
+try:
+    from flask_cors import CORS
+    HAS_CORS = True
+except:
+    HAS_CORS = False
+
 app = Flask(__name__)
+
+if HAS_CORS:
+    CORS(app)
+else:
+    @app.after_request
+    def after_request(response):
+        response.headers.set('Access-Control-Allow-Origin', '*')
+        response.headers.set('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+        return response
 
 # Config
 JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret')
@@ -30,47 +46,25 @@ def get_db():
                 client.admin.command('ping')
                 db = client[db_name]
                 db_available = True
-            except Exception as e:
-                print(f"DB error: {e}")
+            except:
+                pass
     return db
 
-def cors_response(data, status=200):
-    response = make_response(jsonify(data), status)
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
-    return response
-
-# Handle OPTIONS for all routes
-@app.before_request
-def handle_preflight():
-    if request.method == 'OPTIONS':
-        return cors_response({})
-
-@app.route('/', methods=['GET', 'OPTIONS'])
+@app.route('/')
+@app.route('/api/')
 def root():
-    if request.method == 'OPTIONS':
-        return cors_response({})
     get_db()
-    return cors_response({
-        "message": "Earl's Landscaping API",
-        "status": "ok",
-        "db_connected": db_available
-    })
+    return jsonify({"message": "Earl's Landscaping API", "status": "ok", "db_connected": db_available})
 
-@app.route('/api/', methods=['GET', 'OPTIONS'])
-def api_root():
-    return cors_response({
-        "message": "Earl's Landscaping API",
-        "status": "ok",
-        "db_connected": db_available
-    })
+@app.route('/api/test', methods=['GET', 'POST', 'OPTIONS'])
+def test_endpoint():
+    """Simple test endpoint to verify CORS and POST working"""
+    return jsonify({"method": request.method, "success": True, "timestamp": datetime.now(timezone.utc).isoformat()})
 
-# Promo banner - both with and without trailing slash
 @app.route('/api/promo-banner', methods=['GET', 'OPTIONS'])
 @app.route('/api/promo-banner/', methods=['GET', 'OPTIONS'])
 def get_promo():
-    return cors_response({
+    return jsonify({
         "enabled": True,
         "title": "Spring Cleanup Special - 15% OFF!",
         "subtitle": "Book by March 1st to save",
@@ -78,19 +72,16 @@ def get_promo():
         "deadline_date": "2026-03-01"
     })
 
-# Analytics - both with and without trailing slash
 @app.route('/api/analytics/pageview', methods=['POST', 'OPTIONS'])
 @app.route('/api/analytics/pageview/', methods=['POST', 'OPTIONS'])
 def track_pageview():
-    return cors_response({"success": True})
+    return jsonify({"success": True})
 
-# Leads - both with and without trailing slash
 @app.route('/api/leads', methods=['POST', 'OPTIONS'])
 @app.route('/api/leads/', methods=['POST', 'OPTIONS'])
 def create_lead():
     try:
         data = request.get_json(force=True, silent=True) or {}
-        print(f"LEAD DATA: {data}")
         db = get_db()
         
         lead = {
@@ -105,55 +96,41 @@ def create_lead():
         
         if db:
             db.leads.insert_one(lead)
-            print(f"SAVED: {lead['_id']}")
-        else:
-            print("NO DB - not saved")
         
-        return cors_response({"success": True, "message": "Lead created"})
+        return jsonify({"success": True, "message": "Lead created"})
     except Exception as e:
-        print(f"ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        return cors_response({"success": False, "message": str(e)}, 500)
+        return jsonify({"success": False, "message": str(e)}), 500
 
-# Login - both with and without trailing slash
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 @app.route('/api/auth/login/', methods=['POST', 'OPTIONS'])
 def login():
     data = request.get_json(force=True, silent=True) or {}
-    print(f"LOGIN: {data.get('username')}")
-    
     if data.get('username') == ADMIN_USER and data.get('password') == ADMIN_PASS:
         token = jwt.encode({
             'sub': data['username'],
             'exp': datetime.now(timezone.utc) + timedelta(hours=24)
         }, JWT_SECRET, algorithm='HS256')
-        return cors_response({"success": True, "token": token})
-    return cors_response({"success": False, "message": "Invalid credentials"}, 401)
+        return jsonify({"success": True, "token": token})
+    return jsonify({"success": False, "message": "Invalid credentials"}), 401
 
-# Admin leads - both with and without trailing slash
 @app.route('/api/admin/leads', methods=['GET', 'OPTIONS'])
 @app.route('/api/admin/leads/', methods=['GET', 'OPTIONS'])
 def get_leads():
     auth = request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
-        return cors_response({"error": "Unauthorized - no token"}, 401)
+        return jsonify({"error": "Unauthorized"}), 401
     
     try:
         jwt.decode(auth.replace('Bearer ', ''), JWT_SECRET, algorithms=['HS256'])
     except:
-        return cors_response({"error": "Unauthorized - invalid token"}, 401)
+        return jsonify({"error": "Unauthorized"}), 401
     
     db = get_db()
     if not db:
-        return cors_response([])
+        return jsonify([])
     
-    try:
-        leads = list(db.leads.find({}, {'_id': 0}).sort('created_at', -1))
-        for lead in leads:
-            if isinstance(lead.get('created_at'), datetime):
-                lead['created_at'] = lead['created_at'].isoformat()
-        return cors_response(leads)
-    except Exception as e:
-        print(f"GET_LEADS ERROR: {e}")
-        return cors_response({"error": str(e)}, 500)
+    leads = list(db.leads.find({}, {'_id': 0}).sort('created_at', -1))
+    for lead in leads:
+        if isinstance(lead.get('created_at'), datetime):
+            lead['created_at'] = lead['created_at'].isoformat()
+    return jsonify(leads)
