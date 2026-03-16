@@ -9,6 +9,11 @@ import os
 
 app = Flask(__name__)
 
+# DEBUG: Print environment info at startup
+print(f"ENV KEYS: {list(os.environ.keys())}")
+print(f"MONGODB_URI present: {'MONGODB_URI' in os.environ}")
+print(f"MONGO_URL present: {'MONGO_URL' in os.environ}")
+
 # Lazy config loader
 _config = {}
 
