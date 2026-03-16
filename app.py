@@ -1,12 +1,11 @@
 """
 Earl's Landscaping API
 """
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from datetime import datetime, timezone, timedelta
 import uuid
 import jwt
 import os
-import traceback
 
 app = Flask(__name__)
 
@@ -31,38 +30,33 @@ def get_db():
                 client.admin.command('ping')
                 db = client[db_name]
                 db_available = True
-            except Exception as e:
-                print(f"DB connection error: {e}")
+            except:
+                pass
     return db
 
-# CORS - handle OPTIONS properly
-@app.before_request
-def handle_options():
-    if request.method == 'OPTIONS':
-        response = jsonify({})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS')
-        return response, 200
-
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+def cors_response(data, status=200):
+    response = make_response(jsonify(data), status)
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
     return response
 
-@app.route('/')
+@app.route('/', methods=['GET', 'OPTIONS'])
 def root():
+    if request.method == 'OPTIONS':
+        return cors_response({})
     get_db()
-    return jsonify({
+    return cors_response({
         "message": "Earl's Landscaping API",
         "status": "ok",
         "db_connected": db_available
     })
 
-@app.route('/api/')
+@app.route('/api/', methods=['GET', 'OPTIONS'])
 def api_root():
-    return jsonify({
+    if request.method == 'OPTIONS':
+        return cors_response({})
+    return cors_response({
         "message": "Earl's Landscaping API",
         "status": "ok",
         "db_connected": db_available
@@ -70,7 +64,9 @@ def api_root():
 
 @app.route('/api/promo-banner/', methods=['GET', 'OPTIONS'])
 def get_promo():
-    return jsonify({
+    if request.method == 'OPTIONS':
+        return cors_response({})
+    return cors_response({
         "enabled": True,
         "title": "Spring Cleanup Special - 15% OFF!",
         "subtitle": "Book by March 1st to save",
@@ -81,15 +77,18 @@ def get_promo():
 @app.route('/api/analytics/pageview', methods=['POST', 'OPTIONS'])
 @app.route('/api/analytics/pageview/', methods=['POST', 'OPTIONS'])
 def track_pageview():
-    # Stub endpoint - just return success
-    return jsonify({"success": True})
+    if request.method == 'OPTIONS':
+        return cors_response({})
+    return cors_response({"success": True})
 
 @app.route('/api/leads', methods=['POST', 'OPTIONS'])
 @app.route('/api/leads/', methods=['POST', 'OPTIONS'])
 def create_lead():
+    if request.method == 'OPTIONS':
+        return cors_response({})
+    
     try:
         data = request.get_json(force=True, silent=True) or {}
-        print(f"Received lead data: {data}")
         db = get_db()
         
         lead = {
@@ -104,52 +103,51 @@ def create_lead():
         
         if db:
             db.leads.insert_one(lead)
-            print(f"Lead saved: {lead['_id']}")
-        else:
-            print("DB not available, lead not saved")
         
-        return jsonify({"success": True, "message": "Lead created"})
+        return cors_response({"success": True, "message": "Lead created"})
     except Exception as e:
-        print(f"Error in create_lead: {e}")
-        traceback.print_exc()
-        return jsonify({"success": False, "message": str(e)}), 500
+        return cors_response({"success": False, "message": str(e)}, 500)
 
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 @app.route('/api/auth/login/', methods=['POST', 'OPTIONS'])
 def login():
+    if request.method == 'OPTIONS':
+        return cors_response({})
+    
     data = request.get_json(force=True, silent=True) or {}
-    print(f"Login attempt for: {data.get('username')}")
     
     if data.get('username') == ADMIN_USER and data.get('password') == ADMIN_PASS:
         token = jwt.encode({
             'sub': data['username'],
             'exp': datetime.now(timezone.utc) + timedelta(hours=24)
         }, JWT_SECRET, algorithm='HS256')
-        return jsonify({"success": True, "token": token})
-    return jsonify({"success": False, "message": "Invalid credentials"}), 401
+        return cors_response({"success": True, "token": token})
+    return cors_response({"success": False, "message": "Invalid credentials"}, 401)
 
 @app.route('/api/admin/leads', methods=['GET', 'OPTIONS'])
 @app.route('/api/admin/leads/', methods=['GET', 'OPTIONS'])
 def get_leads():
-    # Check auth
+    if request.method == 'OPTIONS':
+        return cors_response({})
+    
     auth = request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
-        return jsonify({"error": "Unauthorized - no token"}), 401
+        return cors_response({"error": "Unauthorized - no token"}, 401)
     
     try:
         jwt.decode(auth.replace('Bearer ', ''), JWT_SECRET, algorithms=['HS256'])
     except:
-        return jsonify({"error": "Unauthorized - invalid token"}), 401
+        return cors_response({"error": "Unauthorized - invalid token"}, 401)
     
     db = get_db()
     if not db:
-        return jsonify([])
+        return cors_response([])
     
     try:
         leads = list(db.leads.find({}, {'_id': 0}).sort('created_at', -1))
         for lead in leads:
             if isinstance(lead.get('created_at'), datetime):
                 lead['created_at'] = lead['created_at'].isoformat()
-        return jsonify(leads)
+        return cors_response(leads)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return cors_response({"error": str(e)}, 500)
