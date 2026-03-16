@@ -221,4 +221,4 @@ def not_found(e):
 @app.errorhandler(500)
 def server_error(e):
     print(f"500 error: {e}")
-    return jsonify({"error": "Server error"
+    return jsonify({"error": "Server error"}), 500
