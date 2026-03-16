@@ -130,6 +130,27 @@ def create_lead():
             print("No database available")
             return jsonify({"success": False, "message": "Database not configured"}), 500
         
+        # Send email notification
+        if RESEND_API_KEY:
+            try:
+                import resend
+                resend.api_key = RESEND_API_KEY
+                resend.Emails.send({
+                    "from": FROM_EMAIL,
+                    "to": NOTIFICATION_EMAILS,
+                    "subject": "New Lead - Earl's Landscaping",
+                    "html": f"""
+                    <h2>New Lead Received</h2>
+                    <p><strong>Name:</strong> {lead['name']}</p>
+                    <p><strong>Email:</strong> {lead['email']}</p>
+                    <p><strong>Phone:</strong> {lead['phone']}</p>
+                    <p><strong>Service:</strong> {lead['service_type']}</p>
+                    """
+                })
+                print(f"Email sent for lead: {lead['_id']}")
+            except Exception as e:
+                print(f"Email failed: {e}")
+        
         return jsonify({"success": True, "message": "Lead created", "lead_id": lead['_id']})
     except Exception as e:
         print(f"Error creating lead: {e}")
