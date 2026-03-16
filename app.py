@@ -1,19 +1,35 @@
 """
-Earl's Landscaping API - With MongoDB
+Earl's Landscaping API - Fixed for Vercel Serverless
 """
 from flask import Flask, request, jsonify
 from datetime import datetime, timezone, timedelta
 import uuid
 import jwt
 import os
-import traceback
 
 app = Flask(__name__)
 
-# Email config
-RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
-FROM_EMAIL = os.environ.get('FROM_EMAIL', 'onboarding@resend.dev')
-NOTIFICATION_EMAILS = ['vevadeco@gmail.com', 'vevadeco@gmail.com']
+# Lazy config loader
+_config = {}
+
+def get_config(key, default=''):
+    if key not in _config:
+        _config[key] = os.environ.get(key, default)
+    return _config[key]
+
+def init_config():
+    """Initialize all config at startup"""
+    _config['JWT_SECRET'] = os.environ.get('JWT_SECRET', 'default-secret')
+    _config['ADMIN_USERNAME'] = os.environ.get('ADMIN_USERNAME', 'shahbaz')
+    _config['ADMIN_PASSWORD'] = os.environ.get('ADMIN_PASSWORD', 'Shaherzad123!')
+    _config['MONGO_URL'] = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL', '')
+    _config['DB_NAME'] = os.environ.get('DB_NAME', 'atlas-pink-xylophone')
+    _config['RESEND_API_KEY'] = os.environ.get('RESEND_API_KEY', '')
+    _config['FROM_EMAIL'] = os.environ.get('FROM_EMAIL', 'onboarding@resend.dev')
+    return _config
+
+# Call at startup
+init_config()
 
 # CORS
 @app.after_request
@@ -23,34 +39,26 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,PATCH,OPTIONS')
     return response
 
-# Config - Read at startup
-JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret')
-ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'shahbaz')
-ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'Shaherzad123!')
-MONGO_URL = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL', '')
-DB_NAME = os.environ.get('DB_NAME', 'atlas-pink-xylophone')
-
-# Debug: log env var status (don't log actual values)
-print(f"MONGO_URL set: {bool(MONGO_URL)}")
-print(f"DB_NAME: {DB_NAME}")
-
 # MongoDB connection (lazy)
 db = None
 db_available = False
 
 def get_db():
     global db, db_available
-    if db is None and MONGO_URL:
-        try:
-            from pymongo import MongoClient
-            client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
-            client.server_info()
-            db = client[DB_NAME]
-            db_available = True
-            print("MongoDB connected")
-        except Exception as e:
-            print(f"MongoDB failed: {e}")
-            db_available = False
+    if db is None:
+        mongo_url = get_config('MONGO_URL')
+        db_name = get_config('DB_NAME')
+        
+        if mongo_url:
+            try:
+                from pymongo import MongoClient
+                client = MongoClient(mongo_url, serverSelectionTimeoutMS=5000)
+                client.server_info()
+                db = client[db_name]
+                db_available = True
+            except Exception as e:
+                print(f"MongoDB failed: {e}")
+                db_available = False
     return db
 
 # ============== AUTH ==============
@@ -61,30 +69,40 @@ def generate_token(username):
         'exp': datetime.now(timezone.utc) + timedelta(hours=24),
         'iat': datetime.now(timezone.utc)
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm='HS256')
+    return jwt.encode(payload, get_config('JWT_SECRET'), algorithm='HS256')
 
 def verify_token():
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
         return None
-    
     token = auth_header.replace('Bearer ', '')
     try:
-        return jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
+        return jwt.decode(token, get_config('JWT_SECRET'), algorithms=['HS256'])
     except:
         return None
 
-# ============== PUBLIC ROUTES ==============
+# ============== ROUTES ==============
 
-@app.route('/', methods=['GET', 'OPTIONS'])
+@app.route('/')
 def root():
-    return jsonify({"message": "Earl's Landscaping API", "status": "ok", "db": db_available})
+    mongo_set = bool(get_config('MONGO_URL'))
+    return jsonify({
+        "message": "Earl's Landscaping API",
+        "status": "ok",
+        "db_configured": mongo_set,
+        "db_connected": db_available
+    })
 
-@app.route('/api/', methods=['GET', 'OPTIONS'])
+@app.route('/api/')
 def api_root():
-    return jsonify({"message": "Earl's Landscaping API", "status": "ok", "db": db_available})
+    return jsonify({
+        "message": "Earl's Landscaping API",
+        "status": "ok",
+        "db_configured": bool(get_config('MONGO_URL')),
+        "db_connected": db_available
+    })
 
-@app.route('/api/promo-banner/', methods=['GET', 'OPTIONS'])
+@app.route('/api/promo-banner/')
 def get_promo():
     return jsonify({
         "enabled": True,
@@ -102,11 +120,9 @@ def create_lead():
     
     try:
         data = request.get_json() or {}
-        print(f"Creating lead: {data.get('email')}")
-        
         required = ['name', 'email', 'phone', 'service_type']
         if not all(r in data for r in required):
-            return jsonify({"success": False, "message": "Missing required fields"}), 400
+            return jsonify({"success": False, "message": "Missing fields"}), 400
         
         lead = {
             "_id": str(uuid.uuid4()),
@@ -121,44 +137,26 @@ def create_lead():
         # Save to MongoDB
         db = get_db()
         if db:
-            try:
-                db.leads.insert_one(lead)
-                print(f"Lead saved: {lead['_id']}")
-            except Exception as e:
-                print(f"MongoDB save failed: {e}")
-                return jsonify({"success": False, "message": "Database error"}), 500
-        else:
-            print("No database")
-            return jsonify({"success": False, "message": "Database not configured"}), 500
+            db.leads.insert_one(lead)
         
-        # Send email notification
-        if RESEND_API_KEY:
+        # Send email
+        resend_key = get_config('RESEND_API_KEY')
+        if resend_key:
             try:
                 import resend
-                resend.api_key = RESEND_API_KEY
+                resend.api_key = resend_key
                 resend.Emails.send({
-                    "from": FROM_EMAIL,
-                    "to": NOTIFICATION_EMAILS,
+                    "from": get_config('FROM_EMAIL'),
+                    "to": ['vevadeco@gmail.com'],
                     "subject": "New Lead - Earl's Landscaping",
-                    "html": f"""
-                    <h2>New Lead Received</h2>
-                    <p><strong>Name:</strong> {lead['name']}</p>
-                    <p><strong>Email:</strong> {lead['email']}</p>
-                    <p><strong>Phone:</strong> {lead['phone']}</p>
-                    <p><strong>Service:</strong> {lead['service_type']}</p>
-                    """
+                    "html": f"<h2>New Lead</h2><p>Name: {lead['name']}</p><p>Email: {lead['email']}</p><p>Phone: {lead['phone']}</p><p>Service: {lead['service_type']}</p>"
                 })
-                print(f"Email sent for lead: {lead['_id']}")
-            except Exception as e:
-                print(f"Email failed: {e}")
+            except:
+                pass
         
-        return jsonify({"success": True, "message": "Lead created", "lead_id": lead['_id']})
+        return jsonify({"success": True, "message": "Lead created"})
     except Exception as e:
-        print(f"Error creating lead: {e}")
-        print(traceback.format_exc())
         return jsonify({"success": False, "message": str(e)}), 500
-
-# ============== AUTH ROUTES ==============
 
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 @app.route('/api/auth/login/', methods=['POST', 'OPTIONS'])
@@ -167,23 +165,17 @@ def login():
         return jsonify({}), 200
     
     data = request.get_json() or {}
-    username = data.get('username')
-    password = data.get('password')
-    
-    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-        token = generate_token(username)
-        return jsonify({"success": True, "token": token, "message": "Login successful"})
-    
+    if data.get('username') == get_config('ADMIN_USERNAME') and data.get('password') == get_config('ADMIN_PASSWORD'):
+        token = generate_token(data['username'])
+        return jsonify({"success": True, "token": token})
     return jsonify({"success": False, "message": "Invalid credentials"}), 401
 
-@app.route('/api/auth/verify/', methods=['GET', 'OPTIONS'])
+@app.route('/api/auth/verify/')
 def verify():
     payload = verify_token()
     if payload:
-        return jsonify({"valid": True, "username": payload.get('sub')})
+        return jsonify({"valid": True})
     return jsonify({"valid": False}), 401
-
-# ============== ADMIN ROUTES ==============
 
 @app.route('/api/admin/leads', methods=['GET', 'OPTIONS'])
 @app.route('/api/admin/leads/', methods=['GET', 'OPTIONS'])
@@ -197,28 +189,12 @@ def get_leads():
     try:
         db = get_db()
         if not db:
-            return jsonify({"error": "Database not available"}), 500
+            return jsonify([])
         
         leads = list(db.leads.find({}, {'_id': 0}).sort('created_at', -1))
-        
-        # Convert datetime to string for JSON serialization
         for lead in leads:
             if isinstance(lead.get('created_at'), datetime):
                 lead['created_at'] = lead['created_at'].isoformat()
-        
-        print(f"Retrieved {len(leads)} leads")
         return jsonify(leads)
     except Exception as e:
-        print(f"Error retrieving leads: {e}")
         return jsonify({"error": str(e)}), 500
-
-# ============== ERROR HANDLERS ==============
-
-@app.errorhandler(404)
-def not_found(e):
-    return jsonify({"error": "Not found", "path": request.path}), 404
-
-@app.errorhandler(500)
-def server_error(e):
-    print(f"500 error: {e}")
-    return jsonify({"error": "Server error"}), 500
