@@ -55,19 +55,27 @@ def get_db():
         mongo_url = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL', '')
         db_name = os.environ.get('DB_NAME', 'atlas-pink-xylophone')
         
-        print(f"Connecting to MongoDB... URL set: {bool(mongo_url)}")
+        print(f"Connecting to MongoDB...")
+        print(f"DB_NAME from env: {os.environ.get('DB_NAME', 'NOT SET')}")
         
         if mongo_url:
             try:
                 from pymongo import MongoClient
-                client = MongoClient(mongo_url)
+                import urllib.parse
+                # Log connection string (masked)
+                parsed = urllib.parse.urlparse(mongo_url)
+                print(f"Connecting to host: {parsed.hostname}, db: {db_name}")
+                
+                client = MongoClient(mongo_url, serverSelectionTimeoutMS=10000)
                 # Test connection
                 client.admin.command('ping')
                 db = client[db_name]
                 db_available = True
-                print("MongoDB connected successfully!")
+                print(f"MongoDB connected successfully to {db_name}!")
             except Exception as e:
+                import traceback
                 print(f"MongoDB connection failed: {e}")
+                print(traceback.format_exc())
                 db_available = False
         else:
             print("No MongoDB URL configured")
