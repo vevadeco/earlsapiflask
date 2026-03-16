@@ -10,6 +10,11 @@ import traceback
 
 app = Flask(__name__)
 
+# Email config
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+FROM_EMAIL = os.environ.get('FROM_EMAIL', 'onboarding@resend.dev')
+NOTIFICATION_EMAILS = ['vevadeco@gmail.com', 'info@earlslandscaping.ca']
+
 # CORS
 @app.after_request
 def after_request(response):
