@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import jwt
 import os
+import traceback
 
 app = Flask(__name__)
 
@@ -30,11 +31,20 @@ def get_db():
                 client.admin.command('ping')
                 db = client[db_name]
                 db_available = True
-            except:
-                pass
+            except Exception as e:
+                print(f"DB connection error: {e}")
     return db
 
-# CORS
+# CORS - handle OPTIONS properly
+@app.before_request
+def handle_options():
+    if request.method == 'OPTIONS':
+        response = jsonify({})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS')
+        return response, 200
+
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
@@ -68,14 +78,18 @@ def get_promo():
         "deadline_date": "2026-03-01"
     })
 
+@app.route('/api/analytics/pageview', methods=['POST', 'OPTIONS'])
+@app.route('/api/analytics/pageview/', methods=['POST', 'OPTIONS'])
+def track_pageview():
+    # Stub endpoint - just return success
+    return jsonify({"success": True})
+
 @app.route('/api/leads', methods=['POST', 'OPTIONS'])
 @app.route('/api/leads/', methods=['POST', 'OPTIONS'])
 def create_lead():
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
     try:
         data = request.get_json(force=True, silent=True) or {}
+        print(f"Received lead data: {data}")
         db = get_db()
         
         lead = {
@@ -90,18 +104,22 @@ def create_lead():
         
         if db:
             db.leads.insert_one(lead)
+            print(f"Lead saved: {lead['_id']}")
+        else:
+            print("DB not available, lead not saved")
         
         return jsonify({"success": True, "message": "Lead created"})
     except Exception as e:
+        print(f"Error in create_lead: {e}")
+        traceback.print_exc()
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 @app.route('/api/auth/login/', methods=['POST', 'OPTIONS'])
 def login():
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
     data = request.get_json(force=True, silent=True) or {}
+    print(f"Login attempt for: {data.get('username')}")
+    
     if data.get('username') == ADMIN_USER and data.get('password') == ADMIN_PASS:
         token = jwt.encode({
             'sub': data['username'],
@@ -113,9 +131,6 @@ def login():
 @app.route('/api/admin/leads', methods=['GET', 'OPTIONS'])
 @app.route('/api/admin/leads/', methods=['GET', 'OPTIONS'])
 def get_leads():
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
     # Check auth
     auth = request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
