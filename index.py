@@ -12,16 +12,33 @@ import traceback
 app = Flask(__name__, static_folder='build', static_url_path='')
 
 # Config
-JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret')
-ADMIN_USER = os.environ.get('ADMIN_USERNAME', 'shahbaz')
-ADMIN_PASS = os.environ.get('ADMIN_PASSWORD', 'Shaherzad123!')
+JWT_SECRET = os.environ.get('JWT_SECRET') or os.environ.get('SECRET_KEY') or ''
+ADMIN_USER = os.environ.get('ADMIN_USERNAME') or ''
+ADMIN_PASS = os.environ.get('ADMIN_PASSWORD') or ''
 
 # CORS
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     return response
+
+
+def _preflight_ok():
+    return jsonify({}), 200
+
+
+def _require_env(var_name: str):
+    if not os.environ.get(var_name):
+        raise RuntimeError(f"Missing required env var: {var_name}")
+
+
+def _serialize_lead(lead: dict) -> dict:
+    created_at = lead.get("created_at")
+    if isinstance(created_at, datetime):
+        lead["created_at"] = created_at.isoformat()
+    return lead
 
 # MongoDB
 db = None
@@ -46,14 +63,18 @@ def get_db():
 # API ROUTES
 @app.route('/api/health')
 def health():
+    get_db()
     return jsonify({"status": "ok", "db_connected": db_available})
 
 @app.route('/api/')
 def api_root():
     return jsonify({"message": "Earl's API", "status": "ok", "db_connected": db_available})
 
-@app.route('/api/promo-banner')
+@app.route('/api/promo-banner', methods=['GET', 'OPTIONS'])
+@app.route('/api/promo-banner/', methods=['GET', 'OPTIONS'])
 def get_promo():
+    if request.method == 'OPTIONS':
+        return _preflight_ok()
     return jsonify({
         "enabled": True,
         "title": "Spring Cleanup Special - 15% OFF!",
@@ -62,33 +83,56 @@ def get_promo():
         "deadline_date": "2026-03-01"
     })
 
-@app.route('/api/analytics/pageview', methods=['POST'])
+@app.route('/api/analytics/pageview', methods=['POST', 'OPTIONS'])
+@app.route('/api/analytics/pageview/', methods=['POST', 'OPTIONS'])
 def track_pageview():
+    if request.method == 'OPTIONS':
+        return _preflight_ok()
     return jsonify({"success": True})
 
-@app.route('/api/leads', methods=['POST'])
+@app.route('/api/leads', methods=['POST', 'OPTIONS'])
+@app.route('/api/leads/', methods=['POST', 'OPTIONS'])
 def create_lead():
+    if request.method == 'OPTIONS':
+        return _preflight_ok()
     try:
         data = request.get_json(force=True, silent=True) or {}
         db = get_db()
+        if not db:
+            return jsonify({"success": False, "message": "Database not configured"}), 503
+
         lead = {
             "_id": str(uuid.uuid4()),
-            "name": data.get('name'),
-            "email": data.get('email'),
-            "phone": data.get('phone'),
-            "service_type": data.get('service_type'),
+            "name": (data.get('name') or "").strip() or None,
+            "email": (data.get('email') or "").strip() or None,
+            "phone": (data.get('phone') or "").strip() or None,
+            "service_type": (data.get('service_type') or "").strip() or None,
             "status": "new",
             "created_at": datetime.now(timezone.utc)
         }
-        if db:
-            db.leads.insert_one(lead)
+
+        if not lead["name"] and not lead["email"] and not lead["phone"]:
+            return jsonify({"success": False, "message": "Missing contact info"}), 400
+
+        db.leads.insert_one(lead)
         return jsonify({"success": True, "message": "Lead created"})
     except Exception as e:
         traceback.print_exc()
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route('/api/auth/login', methods=['POST'])
+@app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
+@app.route('/api/auth/login/', methods=['POST', 'OPTIONS'])
 def login():
+    if request.method == 'OPTIONS':
+        return _preflight_ok()
+
+    try:
+        _require_env('JWT_SECRET')
+        _require_env('ADMIN_USERNAME')
+        _require_env('ADMIN_PASSWORD')
+    except RuntimeError as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
     data = request.get_json(force=True, silent=True) or {}
     if data.get('username') == ADMIN_USER and data.get('password') == ADMIN_PASS:
         token = jwt.encode({
@@ -98,8 +142,16 @@ def login():
         return jsonify({"success": True, "token": token})
     return jsonify({"success": False, "message": "Invalid credentials"}), 401
 
-@app.route('/api/admin/leads')
+@app.route('/api/admin/leads', methods=['GET', 'OPTIONS'])
+@app.route('/api/admin/leads/', methods=['GET', 'OPTIONS'])
 def get_leads():
+    if request.method == 'OPTIONS':
+        return _preflight_ok()
+
+    try:
+        _require_env('JWT_SECRET')
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
     auth = request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({"error": "Unauthorized"}), 401
@@ -111,6 +163,7 @@ def get_leads():
     if not db:
         return jsonify([])
     leads = list(db.leads.find({}, {'_id': 0}).sort('created_at', -1))
+    leads = [_serialize_lead(l) for l in leads]
     return jsonify(leads)
 
 # FRONTEND - Catch all routes and serve React

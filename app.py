@@ -12,9 +12,9 @@ import traceback
 app = Flask(__name__, static_folder='build', static_url_path='')
 
 # ============== CONFIG ==============
-JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret')
-ADMIN_USER = os.environ.get('ADMIN_USERNAME', 'shahbaz')
-ADMIN_PASS = os.environ.get('ADMIN_PASSWORD', 'Shaherzad123!')
+JWT_SECRET = os.environ.get('JWT_SECRET') or os.environ.get('SECRET_KEY') or ''
+ADMIN_USER = os.environ.get('ADMIN_USERNAME') or ''
+ADMIN_PASS = os.environ.get('ADMIN_PASSWORD') or ''
 
 # ============== CORS ==============
 @app.after_request
@@ -87,6 +87,8 @@ def create_lead():
     try:
         data = request.get_json(force=True, silent=True) or {}
         db = get_db()
+        if not db:
+            return jsonify({"success": False, "message": "Database not configured"}), 503
         
         lead = {
             "_id": str(uuid.uuid4()),
@@ -98,8 +100,7 @@ def create_lead():
             "created_at": datetime.now(timezone.utc)
         }
         
-        if db:
-            db.leads.insert_one(lead)
+        db.leads.insert_one(lead)
         
         return jsonify({"success": True, "message": "Lead created"})
     except Exception as e:
@@ -111,6 +112,9 @@ def create_lead():
 def login():
     if request.method == 'OPTIONS':
         return jsonify({}), 200
+    
+    if not JWT_SECRET or not ADMIN_USER or not ADMIN_PASS:
+        return jsonify({"success": False, "message": "Server misconfigured: set JWT_SECRET, ADMIN_USERNAME, ADMIN_PASSWORD"}), 500
     
     data = request.get_json(force=True, silent=True) or {}
     
@@ -127,6 +131,9 @@ def login():
 def get_leads():
     if request.method == 'OPTIONS':
         return jsonify({}), 200
+    
+    if not JWT_SECRET:
+        return jsonify({"error": "Server misconfigured: set JWT_SECRET"}), 500
     
     auth = request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
